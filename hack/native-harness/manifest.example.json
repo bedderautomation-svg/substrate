@@ -1,0 +1,12 @@
+{
+  "owner": "axiom-substrate-native-harness",
+  "schema_version": 1,
+  "license": "Apache-2.0",
+  "copyright": "2026 bedderautomation-svg",
+  "code_sha256": {
+    "harness.py": "068bbbdc349a4bce62e018c14ea86a39c1525dd609598fbcf5d6934ff551aacd",
+    "native_client.py": "aefcd4fee8ea02e0dca6f9a15792aaffbad463bb149fde1815a4e5277fea4831",
+    "supervise.py": "00d542ef1ef957c9ecd471879f30d3bc9f508b17060e07e771b4d3c6772b8996",
+    "native_watchdog.py": "d6159083bea19b2da106d105b9d85355f918c611015be3389e7d5a87525c2a67"
+  }
+}

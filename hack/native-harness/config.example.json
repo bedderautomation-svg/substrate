@@ -1,0 +1,17 @@
+{
+  "owner": "axiom-substrate-native-harness",
+  "schema_version": 1,
+  "source": "/home/sprite/substrate-isolated-20261001/live-source",
+  "source_commit": "f35db03b09645efe659c4c443373f0b1e1c03214",
+  "profile": "/home/sprite/.codex",
+  "cli": "/home/sprite/.local/bin/codex",
+  "migration_guard": "/home/sprite/substrate-isolated-20261001/rootless-podman/continuation-20261001/launch-guard.json",
+  "migration_lock": "/home/sprite/substrate-isolated-20261001/rootless-podman/continuation-20261001/launch-guard.lock",
+  "max_concurrency": 1,
+  "default_max_runtime_seconds": 120,
+  "default_token_budget": 32768,
+  "public_listener": false,
+  "idle_model_calls": 0,
+  "license": "Apache-2.0",
+  "copyright": "2026 bedderautomation-svg"
+}

@@ -1,0 +1,13 @@
+{
+  "service_name": "axiom-substrate-native-harness",
+  "sprite": "mcp-test-blueprint-os",
+  "cmd": "/usr/bin/python3",
+  "args": [
+    "-B",
+    "/home/sprite/substrate-isolated-20261001/native-harness/supervise.py",
+    "--root",
+    "/home/sprite/substrate-isolated-20261001/native-harness"
+  ],
+  "needs": [],
+  "duration": "5s"
+}
