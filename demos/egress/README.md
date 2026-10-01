@@ -46,8 +46,10 @@ intercepted and carried over mTLS to a gateway that verifies who is making the r
   `RUNNING` actor.
 5. **Policy authorization.** What goes through the tunnel is checked against the Actor's
   `EgressPolicy`. A request the gateway can read (cleartext HTTP, or TLS the sdsmint gateway
-  terminates) is decided per request: the rules in order, over its `Host` and the address the
-  Actor dialed, first match wins, and the request is sent to what that rule checked. TLS the
+  terminates) is decided per request by matching the protocol, authority hostname, and the
+  port the Actor dialed. The most specific matching hostname wins, then explicit port
+  restrictions, with policy order breaking ties. The request is sent to the destination
+  that rule checked. TLS the
   plain gateway does not terminate is checked against `tls_passthrough` rules, including
   the destination port and the ClientHello SNI; the gateway dials the resolved authorized
   SNI. Opaque TCP is denied. An Actor with no policy gets no tunnel at all.
