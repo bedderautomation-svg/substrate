@@ -111,7 +111,7 @@ jobs:
             component="${package##*/}"
             layout="$GITHUB_WORKSPACE/images/$component"
             mkdir -p "$layout"
-            "$RUNNER_TEMP/ko" build --push=false --oci-layout-path "$layout" \
+            env -u GOOS -u GOARCH "$RUNNER_TEMP/ko" build --push=false --oci-layout-path "$layout" \
               --image-refs "$layout/image-refs.txt" --base-import-paths \
               --tags="$tag" --platform=linux/amd64 --jobs=1 \
               --ldflags="-X=github.com/agent-substrate/substrate/internal/version.Version=$tag" \
