@@ -19,4 +19,4 @@ resources:
   - ../atenet-router.yaml
 
 components:
-  - ../components/agentgateway
+  - ../components/agentgateway-ingress

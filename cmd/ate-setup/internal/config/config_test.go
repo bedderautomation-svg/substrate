@@ -216,12 +216,12 @@ func TestLoadFlagsBeatEnvironment(t *testing.T) {
 	t.Setenv("ATE_ATENET_DATAPLANE", RouterEnvoy)
 	t.Setenv("ATE_INSTALL_ROLLOUT_TIMEOUT", "30s")
 
-	cfg, err := Load(Options{Router: RouterAgentgateway, RolloutTimeout: "120s"})
+	cfg, err := Load(Options{Router: RouterAgentgatewayIngress, RolloutTimeout: "120s"})
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if cfg.Router != RouterAgentgateway {
-		t.Errorf("Router = %q, want %q", cfg.Router, RouterAgentgateway)
+	if cfg.Router != RouterAgentgatewayIngress {
+		t.Errorf("Router = %q, want %q", cfg.Router, RouterAgentgatewayIngress)
 	}
 	if want := 120 * time.Second; cfg.RolloutTimeout != want {
 		t.Errorf("RolloutTimeout = %v, want %v", cfg.RolloutTimeout, want)
@@ -528,15 +528,52 @@ func TestLoadRejectsInvalidValues(t *testing.T) {
 		{"cluster size", Options{ClusterSize: "size5"}},
 		{"extproc missing sdsmint", Options{AdditionalEgressExtprocService: "ate-system/extproc:50051"}},
 		{"extproc invalid format", Options{ExperimentalUseSDSMint: true, AdditionalEgressExtprocService: "extproc:50051"}},
-		{"extproc agentgateway", Options{ExperimentalUseSDSMint: true, Router: RouterAgentgateway, AdditionalEgressExtprocService: "ate-system/extproc:50051"}},
 		{"injection missing sdsmint", Options{ExperimentalEgressCredentialInjection: true}},
-		{"injection agentgateway", Options{ExperimentalUseSDSMint: true, Router: RouterAgentgateway, ExperimentalEgressCredentialInjection: true}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := Load(tc.opts); err == nil {
 				t.Fatal("Load() succeeded, want an error")
 			}
 		})
+	}
+}
+
+func TestLoadRejectsNativeAgentgatewayEgress(t *testing.T) {
+	loadEnv(t)
+	for _, source := range []string{"flag", "environment"} {
+		t.Run(source, func(t *testing.T) {
+			var opts Options
+			if source == "flag" {
+				opts.Router = "agentgateway"
+			} else {
+				t.Setenv("ATE_ATENET_DATAPLANE", "agentgateway")
+			}
+			_, err := Load(opts)
+			if err == nil {
+				t.Fatal("Load() accepted incompatible native AgentGateway egress")
+			}
+			for _, want := range []string{"EgressPolicy", "agentgateway-ingress", "Envoy egress"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q is missing %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+func TestLoadAgentgatewayIngressSupportsEnvoyEgressFeatures(t *testing.T) {
+	loadEnv(t)
+	cfg, err := Load(Options{
+		Router:                                "agentgateway-ingress",
+		ExperimentalUseSDSMint:                true,
+		AdditionalEgressExtprocService:        "ate-system/extproc:50051",
+		ExperimentalEgressCredentialInjection: true,
+	})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Router != "agentgateway-ingress" {
+		t.Errorf("Router = %q, want agentgateway-ingress", cfg.Router)
 	}
 }
 

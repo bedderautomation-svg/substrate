@@ -1,8 +1,8 @@
 # Egress Demo — Pluggable Egress Networking
 
 This demo shows an Actor's outbound traffic being **transparently tunneled through an
-egress gateway** and **authenticated by actor identity**, end to end. The same demo runs
-with either Envoy or [agentgateway](https://agentgateway.dev/).
+egress gateway** and **authenticated by actor identity**, end to end. The egress gateway
+uses Envoy and the current Substrate policy handlers with either supported ingress mode.
 
 The Actor is a tiny service that accepts `{"url":"..."}`, performs an HTTP `GET`, and returns
 the upstream response. The Actor believes it is dialing plain HTTP directly — but its egress is
@@ -48,8 +48,9 @@ intercepted and carried over mTLS to a gateway that verifies who is making the r
   `EgressPolicy`. A request the gateway can read (cleartext HTTP, or TLS the sdsmint gateway
   terminates) is decided per request: the rules in order, over its `Host` and the address the
   Actor dialed, first match wins, and the request is sent to what that rule checked. TLS the
-  plain gateway does not terminate, and opaque TCP, are allowed by address only, at the
-  `CONNECT`. An Actor with no policy gets no tunnel at all.
+  plain gateway does not terminate is checked against `tls_passthrough` rules, including
+  the destination port and the ClientHello SNI; the gateway dials the resolved authorized
+  SNI. Opaque TCP is denied. An Actor with no policy gets no tunnel at all.
 
 ## Choose a dataplane
 
@@ -60,36 +61,43 @@ ActorTemplate, worker pool, test, and manual walkthrough are otherwise the same.
 # Envoy (default)
 ./hack/install-ate-kind.sh --deploy-ate-system
 
-# agentgateway
-./hack/install-ate-kind.sh --deploy-ate-system --atenet-dataplane=agentgateway
+# AgentGateway ingress with Envoy egress
+./hack/install-ate-kind.sh --deploy-ate-system --atenet-dataplane=agentgateway-ingress
 ```
 
-| | Envoy | agentgateway |
+| | Envoy | AgentGateway ingress + Envoy egress |
 | --- | --- | --- |
-| Select with | `--atenet-dataplane=envoy` (default) | `--atenet-dataplane=agentgateway` |
-| Egress routing | Dynamic forward proxy | Dynamic backend from CONNECT authority |
-| Actor authentication | Co-located atenet `ext_proc` | Built-in `substrateEgress` policy |
-| Configuration | Envoy bootstrap in `atenet-egress.yaml` | Static agentgateway ConfigMap overlay |
-| Access log | Text beginning with `[egress]`, including actor SAN | Structured log including `substrate.connect.authority` |
+| Select with | `--atenet-dataplane=envoy` (default) | `--atenet-dataplane=agentgateway-ingress` |
+| Ingress routing | Envoy with atenet control plane | Pinned native AgentGateway ingress |
+| Egress routing | Envoy dynamic forward proxy | Envoy dynamic forward proxy |
+| Actor authentication and egress policy | Co-located atenet `ext_proc` and Envoy policy module | Same current handlers and policy module |
+| Egress configuration | Envoy bootstrap in `atenet-egress.yaml` | Same Envoy bootstrap |
+| Egress access log | Text beginning with `[egress]`, including actor SAN | Same Envoy access log |
 | MITM mode | Supported with `--experimental-use-sdsmint` | Supported with `--experimental-use-sdsmint` |
 
-The experimental additional egress `ext_proc` service currently requires Envoy; the installer
-rejects that option with agentgateway rather than silently omitting it.
+Both modes support the experimental additional egress `ext_proc` service and credential
+injection with `--experimental-use-sdsmint`.
+
+The installer rejects `--atenet-dataplane=agentgateway`: the pinned native AgentGateway
+egress implementation consumes an incompatible `EgressPolicy` protobuf schema. The hybrid
+mode uses AgentGateway only for ingress and preserves the current Envoy egress policy
+semantics for protocol, hostname, port, SNI, and effects. It does not enable native
+AgentGateway egress.
 
 ## Components
 
 - **Egress app (`main.go`)** — the Actor: `POST /` with `{"url":"..."}` → fetches it → returns
   status + body. It also serves `POST /grpc`, described below.
 - **Egress gateway** — the `atenet-egress` Deployment. Envoy uses a co-located atenet `ext_proc`
-  container started with `--mode=egress`; agentgateway uses its built-in `substrateEgress` policy
-  and does not need that sidecar. The installer renders the matching configuration and container.
+  container started with `--mode=egress` and the Substrate listener policy module. Both ingress
+  modes install these same egress components.
 - **Egress opt-in** — `ate-api-server --default-egress-gateway-address=atenet-egress.ate-system.svc:443`
   (set in `manifests/ate-install/ate-api-server.yaml`). ateapi stamps the address onto every
   atelet `Run`/`Restore`, which turns on tunneled egress cluster-wide.
 - **Egress policy** — the gateway denies by default, so the demo Actor needs an `EgressPolicy`
   before its fetches succeed. `kubectl ate create egress-policy` creates one from a manifest
   (step 3 below) and `kubectl ate get egress-policy` reads it back; the e2e suites create theirs
-  with `e2e.EnsureEgressPolicy`. An `all` rule reproduces the pre-policy behavior.
+  with `e2e.EnsureEgressPolicy`. Each protocol has its own rules and port constraints.
 - **Actor-identity trust** — the gateway mounts the `actor-id-ca-certs` Secret, a cert-only copy of
   the actor-identity CA root that `hack/install-ate.sh` derives from `actor-id-ca-pool` (which also
   holds the CA signing key and is deliberately *not* mounted here).
@@ -125,8 +133,8 @@ It detects the deployed dataplane, deploys an in-cluster HTTP target, creates an
 then asserts:
 
 - **positive** — a real Actor's egress reaches the target (`HTTP 200`) *through the gateway*
-  (the target sees the gateway's IP as its client), and the gateway logs the CONNECT. Envoy's log
-  includes the actor certificate SAN; agentgateway's structured log includes the authority;
+  (the target sees the gateway's IP as its client), and the Envoy gateway's CONNECT log
+  includes the actor certificate SAN;
 - **negative** — a pod holding a valid *pod* identity but no actor certificate cannot open a
   tunnel at all: the gateway trusts the actor-identity CA, so the mTLS handshake is
   refused before any CONNECT is answered.
@@ -172,7 +180,7 @@ to Actor routing.
 
 ### What to observe
 
-With Envoy:
+With either ingress mode:
 
 ```bash
 # The egress gateway logs each tunneled CONNECT against the verified peer certificate:
@@ -182,14 +190,6 @@ kubectl -n ate-system logs deploy/atenet-egress -c envoy | grep '\[egress\]'
 # The co-located ext_proc sidecar logs the identity decision, including the UID it authorized on:
 kubectl -n ate-system logs deploy/atenet-egress -c ext-proc | grep -i 'egress tunnel opened\|egress denied'
 #   egress tunnel opened: an address rule allows the destination  leg=egress actor=ate-demo-egress/egress-demo actorUid=… destination=<TARGET_IP>:80 rule=0
-```
-
-With agentgateway:
-
-```bash
-# The structured access log includes the CONNECT authority:
-kubectl -n ate-system logs deploy/atenet-egress -c agentgateway \
-  | grep 'substrate.connect.authority'
 ```
 
 The `whoami` body shows `RemoteAddr: <atenet-egress pod IP>` — proof the request egressed

@@ -34,8 +34,10 @@ import (
 
 // Enumerated values for the install-shaping flags.
 const (
-	RouterEnvoy        = "envoy"
-	RouterAgentgateway = "agentgateway"
+	RouterEnvoy = "envoy"
+	// RouterAgentgatewayIngress uses native AgentGateway for ingress and the
+	// current Envoy dataplane and Substrate policy handlers for egress.
+	RouterAgentgatewayIngress = "agentgateway-ingress"
 
 	SandboxClassGvisor  = "gvisor"
 	SandboxClassMicrovm = "microvm"
@@ -427,9 +429,11 @@ func validate(cfg *Config) error {
 		return err
 	}
 	switch cfg.Router {
-	case RouterEnvoy, RouterAgentgateway:
+	case RouterEnvoy, RouterAgentgatewayIngress:
+	case "agentgateway":
+		return fmt.Errorf("native AgentGateway egress is incompatible with the current EgressPolicy protobuf schema; use --atenet-dataplane=%s or --atenet-dataplane=%s (AgentGateway ingress with Envoy egress)", RouterEnvoy, RouterAgentgatewayIngress)
 	default:
-		return fmt.Errorf("atenet router must be %s or %s, got %q", RouterEnvoy, RouterAgentgateway, cfg.Router)
+		return fmt.Errorf("atenet router must be %s or %s, got %q", RouterEnvoy, RouterAgentgatewayIngress, cfg.Router)
 	}
 	if cfg.PodcertWorkersPerSigner < 0 {
 		return fmt.Errorf("--podcert-workers-per-signer must be a positive integer, got %d", cfg.PodcertWorkersPerSigner)
@@ -455,16 +459,10 @@ func validate(cfg *Config) error {
 		if !cfg.ExperimentalUseSDSMint {
 			return fmt.Errorf("--experimental-additional-egress-extproc-service requires --experimental-use-sdsmint")
 		}
-		if cfg.Router != RouterEnvoy {
-			return fmt.Errorf("--experimental-additional-egress-extproc-service requires --atenet-dataplane=envoy")
-		}
 	}
 	if cfg.ExperimentalEgressCredentialInjection {
 		if !cfg.ExperimentalUseSDSMint {
 			return fmt.Errorf("--experimental-egress-credential-injection requires --experimental-use-sdsmint")
-		}
-		if cfg.Router != RouterEnvoy {
-			return fmt.Errorf("--experimental-egress-credential-injection requires --atenet-dataplane=envoy")
 		}
 	}
 	return nil

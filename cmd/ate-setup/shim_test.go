@@ -207,8 +207,8 @@ func TestShimTranslatesFlags(t *testing.T) {
 		// The value-bearing flags were pre-scanned, so they shape every action
 		// regardless of where they appear.
 		name: "global flags apply to actions that precede them",
-		args: []string{"--deploy-atenet", "--atenet-dataplane", "agentgateway", "--experimental-use-sdsmint"},
-		want: []string{"--atenet-dataplane=agentgateway --experimental-use-sdsmint deploy atenet"},
+		args: []string{"--deploy-atenet", "--atenet-dataplane", "agentgateway-ingress", "--experimental-use-sdsmint"},
+		want: []string{"--atenet-dataplane=agentgateway-ingress --experimental-use-sdsmint deploy atenet"},
 	}, {
 		name: "cluster profile flags are forwarded in either value form",
 		args: []string{"--deploy-ate-system", "--cluster-size", "size10", "--cordon-control-plane"},

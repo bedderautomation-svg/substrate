@@ -4,7 +4,10 @@ Router has several responsibilities:
 
 * Serves Envoy xDS configuration when `--atenet-dataplane=envoy` (the default).
   With `--atenet-dataplane=agentgateway`, the sidecar uses a static ConfigMap and
-  atenet does not start an xDS server.
+  atenet does not start an xDS server. This daemon flag selects proxy lifecycle
+  behavior; it does not enable native AgentGateway egress. The installer uses
+  `--atenet-dataplane=agentgateway-ingress` for native AgentGateway ingress with
+  current Go/Envoy egress, and rejects the incompatible native egress mode.
 * ext_proc server for the dataplane. To make the deployment and debugging easier, we will run this component together
   with the router, but this will be split later into its own component.
   * ext_proc will call into the ATE gRPC API to get the set of relevant backends (specific the worker IP) and

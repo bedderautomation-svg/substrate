@@ -361,7 +361,7 @@ func TestRenderCordonControlPlane(t *testing.T) {
 		},
 		{
 			name: "agentgateway bundle",
-			cfg:  config.Config{Router: config.RouterAgentgateway},
+			cfg:  config.Config{Router: config.RouterAgentgatewayIngress},
 			path: func(e *Env) string { return e.Cfg.Path(SystemOverlay(e.Cfg)) },
 			want: []string{"ate-api-server", "ate-controller", "atenet-router"},
 		},
@@ -398,14 +398,15 @@ func TestRenderCordonControlPlane(t *testing.T) {
 			want: []string{"atenet-egress"},
 		},
 		{
-			name: "agentgateway egress overlay",
-			path: func(e *Env) string { return e.Cfg.Path(installDir + "/agentgateway-egress") },
+			name: "agentgateway ingress envoy egress",
+			cfg:  config.Config{Router: config.RouterAgentgatewayIngress},
+			path: func(e *Env) string { return e.atenetEgressManifestPath() },
 			want: []string{"atenet-egress"},
 		},
 		{
-			name: "agentgateway egress mitm overlay",
-			cfg:  config.Config{Router: config.RouterAgentgateway, ExperimentalUseSDSMint: true},
-			path: func(e *Env) string { return e.Cfg.Path(installDir + "/agentgateway-egress-mitm") },
+			name: "agentgateway ingress envoy egress mitm",
+			cfg:  config.Config{Router: config.RouterAgentgatewayIngress, ExperimentalUseSDSMint: true},
+			path: func(e *Env) string { return e.atenetEgressManifestPath() },
 			want: []string{"atenet-egress"},
 		},
 	} {
@@ -484,23 +485,23 @@ func TestRenderWithoutCordonLeavesManifestsAlone(t *testing.T) {
 	}
 }
 
-// The two sdsmint switches are coupled: the MITM overlay mounts the CA pool
+// The two sdsmint switches are coupled: the MITM manifest mounts the CA pool
 // Secret EnsureEgressMITMCAPoolSecret generates, so selecting one without the
 // other leaves atenet-egress waiting on a Secret nobody creates.
-func TestAgentgatewayEgressMITMOverlay(t *testing.T) {
+func TestAgentgatewayIngressEnvoyEgressMITMCAPool(t *testing.T) {
 	cfg := &config.Config{
 		Root:                   repoRoot(t),
-		Router:                 config.RouterAgentgateway,
+		Router:                 config.RouterAgentgatewayIngress,
 		ExperimentalUseSDSMint: true,
 	}
 	e := &Env{Cfg: cfg, Kube: fakeKube(t)}
 
-	built, err := e.Kustomize(installDir + "/agentgateway-egress-mitm")
+	built, err := e.render(e.atenetEgressManifestPath())
 	if err != nil {
-		t.Fatalf("Kustomize(agentgateway-egress-mitm) = %v", err)
+		t.Fatalf("render(Envoy egress MITM manifest) = %v", err)
 	}
 	if !strings.Contains(string(built), SecretEgressMITMCAPool) {
-		t.Errorf("the MITM overlay does not mount the %s Secret", SecretEgressMITMCAPool)
+		t.Errorf("the MITM manifest does not mount the %s Secret", SecretEgressMITMCAPool)
 	}
 
 	if err := e.EnsureEgressMITMCAPoolSecret(t.Context()); err != nil {
@@ -511,7 +512,7 @@ func TestAgentgatewayEgressMITMOverlay(t *testing.T) {
 		t.Fatalf("SecretExists() error = %v", err)
 	}
 	if !exists {
-		t.Errorf("no %s Secret was generated for the agentgateway dataplane", SecretEgressMITMCAPool)
+		t.Errorf("no %s Secret was generated for the hybrid mode", SecretEgressMITMCAPool)
 	}
 }
 
@@ -640,6 +641,85 @@ func TestRenderAtenetEgressManifestPrebuilt(t *testing.T) {
 	}
 	if !slices.Contains(looked, "example.com/substrate/envoy-dataplane:v1.2.3") {
 		t.Errorf("registry lookups = %v, want one for envoy-dataplane", looked)
+	}
+}
+
+// The hybrid installs native AgentGateway only on ingress. Every egress
+// variant must keep the same current policy handlers and pinned Envoy image
+// as a full Envoy install, including TLS passthrough and MITM features.
+func TestAgentgatewayIngressEnvoyEgressComposition(t *testing.T) {
+	const digest = "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+	src := images.Source{Repo: "example.com/substrate", Tag: "v1.2.3"}
+	newEnv := func(cfg config.Config) *Env {
+		cfg.Root = repoRoot(t)
+		cfg.Images = src
+		return &Env{
+			Cfg: &cfg,
+			resolver: images.NewPrebuilt(src, func(context.Context, string) (string, error) {
+				return digest, nil
+			}),
+		}
+	}
+	hybrid := newEnv(config.Config{Router: "agentgateway-ingress"})
+	for _, kind := range []bool{false, true} {
+		hybrid.Cfg.Kind = kind
+		for name, render := range map[string]func(context.Context) ([]byte, error){
+			"system": hybrid.renderSystemManifests,
+			"router": hybrid.renderAtenetRouterManifest,
+		} {
+			out, err := render(t.Context())
+			if err != nil {
+				t.Fatalf("%s (kind=%v): %v", name, kind, err)
+			}
+			if !strings.Contains(string(out), "name: agentgateway") ||
+				!strings.Contains(string(out), "image: cr.agentgateway.dev/agentgateway:") ||
+				!strings.Contains(string(out), "@sha256:8177311eb0444df2829cc00410147e960a3bd7261492f2c8d52b48be6d693a45") {
+				t.Errorf("%s (kind=%v) does not install the pinned AgentGateway ingress", name, kind)
+			}
+			if strings.Contains(string(out), "substrateEgress") || strings.Contains(string(out), "atenet-egress-agentgateway") {
+				t.Errorf("%s (kind=%v) includes incompatible native AgentGateway egress policy", name, kind)
+			}
+		}
+	}
+	for _, tc := range []struct {
+		name string
+		cfg  config.Config
+	}{
+		{name: "passthrough"},
+		{name: "sdsmint", cfg: config.Config{ExperimentalUseSDSMint: true}},
+		{name: "extproc and injection", cfg: config.Config{
+			ExperimentalUseSDSMint:                true,
+			AdditionalEgressExtprocService:        "ate-system/extproc:50051",
+			ExperimentalEgressCredentialInjection: true,
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := tc.cfg
+			cfg.Router = config.RouterEnvoy
+			envoy, err := newEnv(cfg).renderAtenetEgressManifest(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg.Router = "agentgateway-ingress"
+			out, err := newEnv(cfg).renderAtenetEgressManifest(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(out) != string(envoy) {
+				t.Error("hybrid egress differs from the current Envoy policy-enforcement manifest")
+			}
+			for _, want := range []string{
+				"image: example.com/substrate/envoy-dataplane:v1.2.3@" + digest,
+				"--mode=egress", "envoy_substrate_egress_policy", "envoy.filters.http.ext_proc",
+			} {
+				if !strings.Contains(string(out), want) {
+					t.Errorf("hybrid egress is missing %q", want)
+				}
+			}
+			if strings.Contains(string(out), "agentgateway") || strings.Contains(string(out), "substrateEgress") {
+				t.Error("hybrid egress includes the incompatible native AgentGateway policy consumer")
+			}
+		})
 	}
 }
 

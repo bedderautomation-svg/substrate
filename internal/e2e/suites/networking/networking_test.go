@@ -274,7 +274,7 @@ func postThroughEgressActorUntil(t *testing.T, ctx context.Context, router *e2e.
 
 // assertEgressGatewayConnect waits for the atenet-egress log to show a CONNECT
 // to port opened by actorName. Envoy logs authenticated peer details in its
-// successful CONNECT access record; AgentGateway logs the terminated tunnel.
+// successful CONNECT access record in both supported ingress modes.
 func assertEgressGatewayConnect(t *testing.T, ctx context.Context, since metav1.Time, atespace, actorName, port string) {
 	t.Helper()
 	want := fmt.Sprintf("a CONNECT to port %s by actor %s/%s", port, atespace, actorName)
@@ -294,13 +294,7 @@ func assertEgressGatewayConnect(t *testing.T, ctx context.Context, since metav1.
 					continue
 				}
 				return true
-			case "agentgateway":
-				if strings.Contains(line.text, "CONNECT tunnel terminated") &&
-					strings.Contains(line.text, "target=") &&
-					strings.Contains(line.text, ":"+port) {
-					t.Logf("egress gateway tunneled the request: %s", line.text)
-					return true
-				}
+
 			}
 		}
 		return false
@@ -338,13 +332,13 @@ func waitForAccessLog(t *testing.T, ctx context.Context, since metav1.Time, want
 		for _, pod := range pods.Items {
 			container := ""
 			for _, candidate := range pod.Spec.Containers {
-				if candidate.Name == "envoy" || candidate.Name == "agentgateway" {
+				if candidate.Name == "envoy" {
 					container = candidate.Name
 					break
 				}
 			}
 			if container == "" {
-				t.Fatalf("egress gateway pod %s has neither an Envoy nor AgentGateway container", pod.Name)
+				t.Fatalf("egress gateway pod %s has no Envoy container", pod.Name)
 			}
 			logs, err := clients.K8s.CoreV1().Pods(gatewayNamespace).GetLogs(pod.Name, &corev1.PodLogOptions{
 				Container: container,
@@ -354,9 +348,7 @@ func waitForAccessLog(t *testing.T, ctx context.Context, since metav1.Time, want
 				t.Fatalf("reading logs of %s/%s: %v", gatewayNamespace, pod.Name, err)
 			}
 			for line := range strings.SplitSeq(string(logs), "\n") {
-				if (container == "envoy" && strings.Contains(line, "[egress] ")) ||
-					(container == "agentgateway" && (strings.Contains(line, "substrate.connect.authority=") ||
-						strings.Contains(line, "CONNECT tunnel terminated"))) {
+				if strings.Contains(line, "[egress] ") {
 					lines = append(lines, gatewayAccessLogLine{container: container, text: line})
 				}
 			}

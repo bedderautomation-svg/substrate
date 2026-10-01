@@ -26,10 +26,10 @@ func TestAtenetDataplaneEgressPolicyDenial(t *testing.T) {
 			t.Error("Envoy CONNECT refusal was not recognized as an egress-policy denial")
 		}
 	})
-	t.Run("agentgateway", func(t *testing.T) {
-		t.Setenv(AtenetDataplaneEnv, "agentgateway")
-		if !CurrentAtenetDataplane().IsEgressPolicyDenied(http.StatusForbidden, "actor egress policy denied destination") {
-			t.Error("AgentGateway direct policy denial was not recognized")
+	t.Run("agentgateway-ingress", func(t *testing.T) {
+		t.Setenv(AtenetDataplaneEnv, "agentgateway-ingress")
+		if !CurrentAtenetDataplane().IsEgressPolicyDenied(http.StatusForbidden, "egress denied destination") {
+			t.Error("hybrid Envoy policy denial was not recognized")
 		}
 	})
 }
@@ -41,10 +41,20 @@ func TestAtenetDataplaneTLSPassthroughEgressPolicy(t *testing.T) {
 			t.Error("Envoy TLS passthrough egress policy was not supported")
 		}
 	})
-	t.Run("agentgateway", func(t *testing.T) {
-		t.Setenv(AtenetDataplaneEnv, "agentgateway")
-		if CurrentAtenetDataplane().SupportsTLSPassthroughEgressPolicy() {
-			t.Error("AgentGateway TLS passthrough egress policy unexpectedly reported support")
+	t.Run("agentgateway-ingress", func(t *testing.T) {
+		t.Setenv(AtenetDataplaneEnv, "agentgateway-ingress")
+		if !CurrentAtenetDataplane().SupportsTLSPassthroughEgressPolicy() {
+			t.Error("hybrid Envoy TLS passthrough egress policy was not supported")
 		}
 	})
+}
+
+func TestCurrentAtenetDataplaneRejectsNativeAgentgateway(t *testing.T) {
+	t.Setenv(AtenetDataplaneEnv, "agentgateway")
+	defer func() {
+		if recover() == nil {
+			t.Error("incompatible native AgentGateway mode silently selected an e2e implementation")
+		}
+	}()
+	CurrentAtenetDataplane()
 }

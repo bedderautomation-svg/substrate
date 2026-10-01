@@ -46,7 +46,7 @@ func NewRouterCmd() *cobra.Command {
 	cmd.Flags().StringVar((*string)(&cfg.Mode), "mode", string(ModeAll), fmt.Sprintf("Traffic direction this instance serves: %q (also runs the ingress control plane — the xDS server — for an Envoy dataplane), %q (ext_proc only, needs no Kubernetes access), or %q for both. The ext_proc mux refuses a direction this instance was not started to serve rather than falling back to the other one", ModeIngress, ModeEgress, ModeAll))
 	cmd.Flags().StringVar(&cfg.LogLevel, "log-level", "info", "Log level: debug, info, warn, error")
 	cmd.Flags().StringVar(&cfg.MetricsAddr, "metrics-listen-addr", ":9090", "Address and port the prometheus metrics server should listen on.")
-	cmd.Flags().StringVar(&cfg.AtenetRouter, "atenet-dataplane", string(atenetRouterEnvoy), "Atenet ingress and egress dataplane: envoy or agentgateway")
+	cmd.Flags().StringVar(&cfg.AtenetRouter, "atenet-dataplane", string(atenetRouterEnvoy), "Proxy lifecycle integration: envoy or agentgateway (health, xDS, and drain behavior; does not enable native AgentGateway egress)")
 	cmd.Flags().StringVar(&cfg.Namespace, "namespace", "default", "Target operations namespace")
 	cmd.Flags().StringVar(&cfg.RouterServiceName, "router-service-name", installdefaults.RouterServiceName, "Service name of this atenet-router in the operations namespace. Override when the deployment renames the Service.")
 	cmd.Flags().StringVar(&cfg.Kubeconfig, "kubeconfig", "", "Absolute path to the kubeconfig configuration file")

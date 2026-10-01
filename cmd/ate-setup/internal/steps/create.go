@@ -83,8 +83,7 @@ func (e *Env) CreateEgressMITMCAPoolSecret(ctx context.Context) error {
 }
 
 // EnsureEgressMITMCAPoolSecret creates the egress MITM CA pool secret if
-// sdsmint is enabled. Both dataplanes need it: the agentgateway-egress-mitm
-// overlay mounts the same Secret the envoy egress does.
+// sdsmint is enabled. Both ingress modes use this same Envoy egress CA pool.
 func (e *Env) EnsureEgressMITMCAPoolSecret(ctx context.Context) error {
 	if !e.Cfg.ExperimentalUseSDSMint {
 		return nil
@@ -217,11 +216,8 @@ func (e *Env) createCAPool(ctx context.Context, namespace, name string) error {
 // A pool with no active CA still signs with its first entry, but only as a
 // backwards-compatibility fallback.
 //
-// The certificate and key are not redundant with the pool. Consumers that speak
-// TLS rather than the pool format mount them directly — the
-// agentgateway-egress-mitm overlay mounts tls.crt and tls.key from
-// egress-mitm-ca-pool non-optionally, so a pool Secret holding only "pool"
-// leaves atenet-egress stuck in ContainerCreating.
+// The standard TLS keys expose the active CA certificate and key alongside the
+// serialized pool for consumers that use the Kubernetes TLS Secret format.
 func newCAPoolSecretData(id string, keyType localca.KeyType) (map[string][]byte, error) {
 	ca, err := localca.GenerateCA(id, keyType, caValidity)
 	if err != nil {

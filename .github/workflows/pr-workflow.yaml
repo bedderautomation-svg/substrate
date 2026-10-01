@@ -122,16 +122,16 @@ jobs:
   # expose /dev/kvm (with a udev rule), so create-kind-cluster.sh mounts it and the
   # micro-VM (kata + cloud-hypervisor) sandbox class works alongside gVisor.
   e2e-test-matrix:
-    name: E2E (${{ matrix.dataplane }})
+    name: E2E (${{ matrix.label }})
     runs-on: ubuntu-latest
     # Cluster bring-up, image builds and six sequential lanes; generous, but far
     # short of the six-hour platform default a hung lane would otherwise consume.
     timeout-minutes: 120
-    continue-on-error: ${{ matrix.experimental }} # TODO: Make AgentGateway required once tests show stability
+    continue-on-error: ${{ matrix.experimental }} # TODO: Make AgentGateway ingress required once tests show stability
     strategy:
       fail-fast: false
       matrix:
-        # AgentGateway runs pre-submit only for release-* branches. Everywhere
+        # AgentGateway ingress with Envoy egress runs pre-submit only for release-* branches. Everywhere
         # else it runs post-merge (push to main) and on the weekly schedule.
         include: >-
           ${{ fromJSON(
@@ -141,11 +141,11 @@ jobs:
               || startsWith(github.event.merge_group.base_ref, 'refs/heads/release-')
             )
             && '[
-              {"dataplane": "envoy", "experimental": false},
-              {"dataplane": "agentgateway", "experimental": true}
+              {"dataplane": "envoy", "label": "Envoy ingress + egress", "experimental": false},
+              {"dataplane": "agentgateway-ingress", "label": "AgentGateway ingress + Envoy egress", "experimental": true}
             ]'
             || '[
-              {"dataplane": "envoy", "experimental": false}
+              {"dataplane": "envoy", "label": "Envoy ingress + egress", "experimental": false}
             ]'
           ) }}
     env:
@@ -181,9 +181,9 @@ jobs:
         sudo udevadm trigger --name-match=kvm
     - name: Create cluster
       run: hack/create-kind-cluster.sh
-    - name: Install Agent Substrate (${{ matrix.dataplane }})
-      # The dataplane selection applies to both the ingress router and egress
-      # gateway.
+    - name: Install Agent Substrate (${{ matrix.label }})
+      # Both modes use the current Envoy egress policy enforcement; only the
+      # ingress router changes in the experimental lane.
       run: hack/install-ate-kind.sh --deploy-ate-system --atenet-dataplane=${{ matrix.dataplane }}
     - name: Enable NFS
       # Load NFS kernel modules so in-cluster NFS server and CSI driver can run.
@@ -268,15 +268,11 @@ jobs:
         E2E_JUNIT_FILE: ${{ github.workspace }}/_artifacts/e2e-networking-mitm-microvm.xml
       run: hack/run-e2e-kind.sh ./internal/e2e/suites/networking -run '^TestActorEgress' -v -args --no-color
     - name: Deploy MITM egress with credential injection
-      # Envoy lane only: the injection flag requires the envoy dataplane.
-      # TODO: support agent gateway as dataplane.
-      if: matrix.dataplane == 'envoy'
-      run: hack/install-ate-kind.sh --deploy-atenet --atenet-dataplane=envoy --experimental-use-sdsmint --experimental-egress-credential-injection
+      run: hack/install-ate-kind.sh --deploy-atenet --atenet-dataplane=${{ matrix.dataplane }} --experimental-use-sdsmint --experimental-egress-credential-injection
     - name: Run E2E tests (egress credential injection)
       # Injection happens entirely inside the gateway, so the sandbox class
       # does not change the path — per-class trust delivery is already the
       # egressmitm steps' job. One (gVisor) run suffices.
-      if: matrix.dataplane == 'envoy'
       env:
         E2E_EGRESS_CREDINJECT: "1"
         E2E_JUNIT_FILE: ${{ github.workspace }}/_artifacts/e2e-credinject.xml
@@ -315,7 +311,7 @@ jobs:
         kubectl --context kind-kind get pods -A -l ate.dev/worker-pool \
           -o 'custom-columns=:.metadata.namespace,:.metadata.name' --no-headers 2>/dev/null \
           | while read -r ns name; do dump "$ns" "$name"; done
-  # Preserve the required-check name while the concrete Envoy and AgentGateway
+  # Preserve the required-check name while the full Envoy and hybrid ingress
   # executions run as entries in the shared matrix above.
   e2e-test:
     name: e2e-test

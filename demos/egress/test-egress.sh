@@ -76,7 +76,8 @@ case "${DATAPLANE}" in
     ACCESS_LOG_PATTERN='\[egress\]'
     ;;
   agentgateway)
-    ACCESS_LOG_PATTERN='substrate.connect.authority'
+    echo "native AgentGateway egress is incompatible with current EgressPolicy; install --atenet-dataplane=agentgateway-ingress for AgentGateway ingress with Envoy egress" >&2
+    exit 1
     ;;
   *)
     echo "unsupported egress dataplane container: ${DATAPLANE}" >&2
@@ -134,15 +135,9 @@ if grep -q "RemoteAddr: ${GW_IP}" /tmp/egress-body.txt 2>/dev/null; then
 else
   info "target body RemoteAddr: $(grep -o 'RemoteAddr: [0-9.]*' /tmp/egress-body.txt 2>/dev/null || echo '?') (gateway IP ${GW_IP})"
 fi
-if [[ "${DATAPLANE}" == "envoy" ]]; then
-  # Envoy's access log identifies the peer by its certificate SAN, not by any
-  # header the actor could have written.
-  ALLOWED_LOG_PATTERN="actor/${ACTOR}.*code=200"
-else
-  # agentgateway's structured access log records the CONNECT authority. Actor
-  # authentication is also covered by the successful request and negative test.
-  ALLOWED_LOG_PATTERN="substrate.connect.authority.*${TARGET_IP}:${TARGET_PORT}"
-fi
+# Envoy's access log identifies the peer by its certificate SAN, not by any
+# header the actor could have written.
+ALLOWED_LOG_PATTERN="actor/${ACTOR}.*code=200"
 if LINE=$(wait_egress_log "${BEFORE}" "${ALLOWED_LOG_PATTERN}"); then
   pass "gateway logged the CONNECT: ${LINE}"
 else

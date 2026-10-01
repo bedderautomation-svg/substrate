@@ -52,10 +52,10 @@ const cordonControlPlaneComponent = installDir + "/components/cordon-control-pla
 // steps.
 func SystemOverlay(cfg *config.Config) string {
 	switch {
-	case cfg.Router == config.RouterAgentgateway && cfg.Kind:
-		return installDir + "/kind-agentgateway"
-	case cfg.Router == config.RouterAgentgateway:
-		return installDir + "/agentgateway"
+	case cfg.Router == config.RouterAgentgatewayIngress && cfg.Kind:
+		return installDir + "/kind-agentgateway-ingress"
+	case cfg.Router == config.RouterAgentgatewayIngress:
+		return installDir + "/agentgateway-ingress"
 	case cfg.Kind:
 		return installDir + "/kind"
 	default:
@@ -123,7 +123,7 @@ func (e *Env) renderSystemManifests(ctx context.Context) ([]byte, error) {
 // renderAtenetRouterManifest produces the atenet router manifest for the
 // selected dataplane.
 func (e *Env) renderAtenetRouterManifest(ctx context.Context) ([]byte, error) {
-	if e.Cfg.Router == config.RouterAgentgateway {
+	if e.Cfg.Router == config.RouterAgentgatewayIngress {
 		return e.renderResolve(ctx, e.Cfg.Path(installDir+"/agentgateway-router"))
 	}
 	return e.renderResolve(ctx, e.Cfg.Manifest("atenet-router.yaml"))
@@ -141,19 +141,6 @@ func (e *Env) atenetEgressManifestPath() string {
 func (e *Env) renderAtenetEgressManifest(ctx context.Context) ([]byte, error) {
 	general := e.Cfg.AdditionalEgressExtprocService != ""
 	injection := e.Cfg.ExperimentalEgressCredentialInjection
-
-	if e.Cfg.Router == config.RouterAgentgateway {
-		if general {
-			return nil, fmt.Errorf("--experimental-additional-egress-extproc-service requires --atenet-dataplane=envoy")
-		}
-		if injection {
-			return nil, fmt.Errorf("--experimental-egress-credential-injection requires --atenet-dataplane=envoy")
-		}
-		if e.Cfg.ExperimentalUseSDSMint {
-			return e.renderResolve(ctx, e.Cfg.Path(installDir+"/agentgateway-egress-mitm"))
-		}
-		return e.renderResolve(ctx, e.Cfg.Path(installDir+"/agentgateway-egress"))
-	}
 
 	imageReference, err := e.dockerfileImage(ctx, envoyDataplaneImage, envoyDataplaneDockefile)
 	if err != nil {

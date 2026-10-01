@@ -26,7 +26,7 @@ import (
 
 // DeleteAteSystem removes the control plane.
 //
-// PostgreSQL, the agentgateway ConfigMap, and the CRDs are deleted explicitly
+// PostgreSQL, the AgentGateway ingress ConfigMap, and the CRDs are deleted explicitly
 // afterwards because they are not part of every rendered bundle: which of them
 // the install created depends on the router that was selected, and teardown
 // must not depend on remembering that.
@@ -57,7 +57,7 @@ func (e *Env) DeleteAteSystem(ctx context.Context) error {
 	}
 
 	for _, path := range [][]string{
-		{"components", "agentgateway", "configmap.yaml"},
+		{"components", "agentgateway-ingress", "configmap.yaml"},
 		{"postgres", "postgres.yaml"},
 		{"generated"},
 	} {
@@ -77,7 +77,7 @@ func (e *Env) DeleteAtenet(ctx context.Context) error {
 
 	for _, path := range [][]string{
 		{"atenet-router.yaml"},
-		{"components", "agentgateway", "configmap.yaml"},
+		{"components", "agentgateway-ingress", "configmap.yaml"},
 		// Both egress variants, not the selected one: teardown has to clean up
 		// an install made with --experimental-use-sdsmint whether or not this
 		// invocation passes it, and either file may declare resources the

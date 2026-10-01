@@ -44,10 +44,14 @@ type AtenetDataplane interface {
 // CurrentAtenetDataplane returns the implementation selected for this test
 // process. Envoy remains the default to match installation defaults.
 func CurrentAtenetDataplane() AtenetDataplane {
-	if os.Getenv(AtenetDataplaneEnv) == "agentgateway" {
-		return agentGatewayAtenetDataplane{}
+	switch mode := os.Getenv(AtenetDataplaneEnv); mode {
+	case "", "envoy":
+		return envoyAtenetDataplane{}
+	case "agentgateway-ingress":
+		return agentGatewayIngressAtenetDataplane{}
+	default:
+		panic(fmt.Sprintf("unsupported %s=%q; use envoy or agentgateway-ingress (AgentGateway ingress with Envoy egress)", AtenetDataplaneEnv, mode))
 	}
-	return envoyAtenetDataplane{}
 }
 
 // ParkingObserver waits for the dataplane's active parked-request gauge.
@@ -83,26 +87,21 @@ func (envoyAtenetDataplane) RouteDurationSeen(_ context.Context, collectorScrape
 
 func (envoyAtenetDataplane) SupportsIngressProtocolDowngrade() bool { return true }
 
-type agentGatewayAtenetDataplane struct{}
+// The hybrid inherits every Envoy egress operation and overrides only the
+// observable behavior of native AgentGateway ingress.
+type agentGatewayIngressAtenetDataplane struct{ envoyAtenetDataplane }
 
-func (agentGatewayAtenetDataplane) NewParkingObserver(context.Context) (ParkingObserver, error) {
+func (agentGatewayIngressAtenetDataplane) NewParkingObserver(context.Context) (ParkingObserver, error) {
 	return agentGatewayParkingObserver{}, nil
 }
 
-func (agentGatewayAtenetDataplane) IsRetryableParkingBudgetExhaustion(status int, body string) bool {
+func (agentGatewayIngressAtenetDataplane) IsRetryableParkingBudgetExhaustion(status int, body string) bool {
 	return status == http.StatusGatewayTimeout && strings.Contains(body, "request timed out")
 }
 
-func (agentGatewayAtenetDataplane) ParkingBudgetStatus() int { return http.StatusGatewayTimeout }
+func (agentGatewayIngressAtenetDataplane) ParkingBudgetStatus() int { return http.StatusGatewayTimeout }
 
-func (agentGatewayAtenetDataplane) IsEgressPolicyDenied(status int, body string) bool {
-	return status == http.StatusForbidden && strings.Contains(body, "actor egress policy denied")
-}
-
-// TODO: Apply substrateEgress to TLS passthrough routes in AgentGateway.
-func (agentGatewayAtenetDataplane) SupportsTLSPassthroughEgressPolicy() bool { return false }
-
-func (agentGatewayAtenetDataplane) PlatformMetricPrefixes(prefixes []string) []string {
+func (agentGatewayIngressAtenetDataplane) PlatformMetricPrefixes(prefixes []string) []string {
 	filtered := make([]string, 0, len(prefixes))
 	for _, prefix := range prefixes {
 		if prefix != "atenet_router_route_duration" {
@@ -112,7 +111,7 @@ func (agentGatewayAtenetDataplane) PlatformMetricPrefixes(prefixes []string) []s
 	return filtered
 }
 
-func (agentGatewayAtenetDataplane) RouteDurationSeen(ctx context.Context, _ string) (bool, error) {
+func (agentGatewayIngressAtenetDataplane) RouteDurationSeen(ctx context.Context, _ string) (bool, error) {
 	scrape, err := ScrapeAgentGatewayRouterMetrics(ctx)
 	if err != nil {
 		return false, err
@@ -120,7 +119,7 @@ func (agentGatewayAtenetDataplane) RouteDurationSeen(ctx context.Context, _ stri
 	return len(MissingPlatformMetrics(scrape, []string{"agentgateway_atenet_router_route_duration_seconds"})) == 0, nil
 }
 
-func (agentGatewayAtenetDataplane) SupportsIngressProtocolDowngrade() bool { return false }
+func (agentGatewayIngressAtenetDataplane) SupportsIngressProtocolDowngrade() bool { return false }
 
 type agentGatewayParkingObserver struct{}
 

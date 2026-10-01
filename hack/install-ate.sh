@@ -93,7 +93,7 @@ usage() {
   echo "                                         a bare --setup-csi means nfs; hostpath is Kind only)"
   echo "  --delete-ate-system                    Delete core system"
   echo "  --delete-all                           Delete core system and all registered demos"
-  echo "  --atenet-dataplane=envoy|agentgateway  Select the atenet ingress and egress dataplane (default: envoy)"
+  echo "  --atenet-dataplane=envoy|agentgateway-ingress  Select envoy, or AgentGateway ingress with Envoy egress (default: envoy)"
   echo "  --podcert-workers-per-signer N         Concurrent workers per podcertificate-controller signer (default: 1)"
   echo "  --cluster-size size0|size10            Cluster size profile (default: size0). \"size10\" assumes a dedicated postgres node"
   echo "  --cordon-control-plane                 Pin each control plane pod to its own node: assumes a pool labeled and tainted"
@@ -112,8 +112,7 @@ usage() {
   echo "                                         Point the egress gateway's MITM-leg handler at a credential provider, so a"
   echo "                                         matching EgressPolicy rule injects its credential. A modifier applied when"
   echo "                                         the gateway is deployed (e.g. with --deploy-atenet); the credential provider"
-  echo "                                         itself is deployed separately. Implies --experimental-use-sdsmint; requires"
-  echo "                                         --atenet-dataplane=envoy. (experimental)"
+  echo "                                         itself is deployed separately. Implies --experimental-use-sdsmint. (experimental)"
   echo "  --credential-provider-name NAME        Provider the injector serves, as a ate-secret:// prefix"
   echo "                                         (default ate-secret://k8s.io). Only meaningful with"
   echo "                                         --experimental-egress-credential-injection. (experimental)"
@@ -258,7 +257,7 @@ for ((i = 0; i < ${#prescan_args[@]}; i++)); do
     --atenet-dataplane=*) GLOBAL_FLAGS+=("${prescan_args[i]}") ;;
     --atenet-dataplane)
       if (( i + 1 >= ${#prescan_args[@]} )); then
-        echo "Error: --atenet-dataplane requires envoy or agentgateway" >&2
+        echo "Error: --atenet-dataplane requires envoy or agentgateway-ingress" >&2
         exit 1
       fi
       GLOBAL_FLAGS+=("--atenet-dataplane=${prescan_args[$((i + 1))]}")
