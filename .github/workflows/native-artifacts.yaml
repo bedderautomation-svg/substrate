@@ -1,0 +1,209 @@
+# Copyright 2026 bedderautomation-svg
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Native deployment artifacts
+on:
+  push:
+    branches: [axiom/runtime-tools-20261001]
+    paths:
+      - .github/workflows/native-artifacts.yaml
+      - hack/runtime-native/source-pin.json
+      - hack/runtime-native/build-local-native.py
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: native-artifacts-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  go-images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out reviewed operations
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          path: operations
+          persist-credentials: false
+      - name: Read the fixed source pin
+        id: pin
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          pin = json.load(open('operations/hack/runtime-native/source-pin.json'))
+          for key in ('source_commit', 'source_tree'):
+              assert re.fullmatch('[0-9a-f]{40}', pin[key])
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write('sha=' + pin['source_commit'] + '\n')
+              out.write('tree=' + pin['source_tree'] + '\n')
+          PY
+      - name: Check out exact application source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ steps.pin.outputs.sha }}
+          path: source
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.27.1'
+          cache-dependency-path: source/go.sum
+      - name: Build every root-module executable from the clean pin
+        run: |
+          python3 -B operations/hack/runtime-native/build-local-native.py \
+            --source "$GITHUB_WORKSPACE/source" --go "$(command -v go)" \
+            --output "$GITHUB_WORKSPACE/build" --cache "$RUNNER_TEMP/native-gocache" \
+            --commit '${{ steps.pin.outputs.sha }}' --tree '${{ steps.pin.outputs.tree }}'
+      - name: Verify and install isolated ko
+        run: |
+          curl --fail --silent --show-error --location --retry 2 \
+            -o "$RUNNER_TEMP/ko.tar.gz" \
+            https://github.com/ko-build/ko/releases/download/v0.19.1/ko_0.19.1_Linux_x86_64.tar.gz
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, tarfile
+          pin = json.load(open('operations/hack/runtime-native/source-pin.json'))
+          archive = pathlib.Path(os.environ['RUNNER_TEMP']) / 'ko.tar.gz'
+          assert hashlib.sha256(archive.read_bytes()).hexdigest() == pin['ko_archive_sha256']
+          with tarfile.open(archive) as tf:
+              member = tf.getmember('ko')
+              assert member.isfile()
+              path = archive.parent / 'ko'
+              path.write_bytes(tf.extractfile(member).read())
+              path.chmod(0o700)
+          PY
+      - name: Export the twelve exact Go OCI images
+        working-directory: source
+        env:
+          SOURCE_SHA: ${{ steps.pin.outputs.sha }}
+          GOTOOLCHAIN: local
+          GOPROXY: 'off'
+          GOSUMDB: 'off'
+          CGO_ENABLED: '0'
+          GOENV: 'off'
+          GOWORK: 'off'
+          GOOS: linux
+          GOARCH: amd64
+          GOAMD64: v1
+          GOFLAGS: ''
+          GOEXPERIMENT: ''
+          GOMAXPROCS: '4'
+          GOMEMLIMIT: 1GiB
+          KO_DOCKER_REPO: localhost:15001/substrate
+        run: |
+          set -euo pipefail
+          export GOCACHE="$RUNNER_TEMP/native-gocache"
+          tag="axiom-${SOURCE_SHA:0:12}"
+          for package in cmd/ateapi cmd/atecontroller cmd/atelet cmd/atenet \
+            cmd/credential-provider/kubernetes-secrets cmd/podcertcontroller \
+            cmd/ateom-gvisor cmd/ateom-microvm demos/counter demos/egress \
+            demos/multi-template/fspersist demos/sandbox; do
+            component="${package##*/}"
+            layout="$GITHUB_WORKSPACE/images/$component"
+            mkdir -p "$layout"
+            "$RUNNER_TEMP/ko" build --push=false --oci-layout-path "$layout" \
+              --image-refs "$layout/image-refs.txt" --base-import-paths \
+              --tags="$tag" --platform=linux/amd64 --jobs=1 \
+              --ldflags="-X=github.com/agent-substrate/substrate/internal/version.Version=$tag" \
+              --image-label="org.opencontainers.image.revision=$SOURCE_SHA" \
+              --image-label="io.ko.build.importpath=github.com/agent-substrate/substrate/$package" "./$package"
+          done
+          git diff --exit-code
+          git diff --cached --exit-code
+          test -z "$(git status --porcelain)"
+          cp ../operations/hack/runtime-native/source-pin.json ../images/source-pin.json
+          python3 - <<'PY'
+          import hashlib, pathlib
+          root = pathlib.Path('../images')
+          paths = sorted(p for p in root.rglob('*') if p.is_file())
+          with (root / 'SHA256SUMS').open('w') as out:
+              for p in paths:
+                  out.write(hashlib.sha256(p.read_bytes()).hexdigest() + '  ' + str(p.relative_to(root)) + '\n')
+          PY
+      - name: Upload exact OCI images
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: substrate-go-oci-${{ steps.pin.outputs.sha }}
+          path: images/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload native installer and complete build provenance
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: substrate-native-cli-${{ steps.pin.outputs.sha }}
+          path: |
+            build/bin/ate-setup
+            build/bin/kubectl-ate
+            build/build-receipt.json
+            build/logs/
+          if-no-files-found: error
+          retention-days: 30
+  envoy-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out reviewed operations
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          path: operations
+          persist-credentials: false
+      - name: Read the fixed source pin
+        id: pin
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          pin = json.load(open('operations/hack/runtime-native/source-pin.json'))
+          assert re.fullmatch('[0-9a-f]{40}', pin['source_commit'])
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write('sha=' + pin['source_commit'] + '\n')
+              out.write('tree=' + pin['source_tree'] + '\n')
+          PY
+      - name: Check out exact application source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ steps.pin.outputs.sha }}
+          path: source
+          persist-credentials: false
+      - name: Build and export the pinned Envoy image
+        env:
+          SOURCE_SHA: ${{ steps.pin.outputs.sha }}
+          SOURCE_TREE: ${{ steps.pin.outputs.tree }}
+        run: |
+          set -euo pipefail
+          test "$(git -C source rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git -C source rev-parse 'HEAD^{tree}')" = "$SOURCE_TREE"
+          test -z "$(git -C source status --porcelain)"
+          mkdir -p envoy
+          tag="substrate-envoy:axiom-${SOURCE_SHA:0:12}"
+          docker build --pull --platform linux/amd64 \
+            --label "org.opencontainers.image.revision=$SOURCE_SHA" \
+            --tag "$tag" source/cmd/dataplane/envoy
+          docker image inspect "$tag" > envoy/image-inspect.json
+          docker image save --output envoy/envoy.tar "$tag"
+          cp operations/hack/runtime-native/source-pin.json envoy/source-pin.json
+          test -z "$(git -C source status --porcelain)"
+          python3 - <<'PY'
+          import hashlib, pathlib
+          root = pathlib.Path('envoy')
+          with (root / 'SHA256SUMS').open('w') as out:
+              for p in sorted(root.iterdir()):
+                  if p.is_file() and p.name != 'SHA256SUMS':
+                      out.write(hashlib.sha256(p.read_bytes()).hexdigest() + '  ' + p.name + '\n')
+          PY
+      - name: Upload exact Envoy image
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: substrate-envoy-${{ steps.pin.outputs.sha }}
+          path: envoy/
+          if-no-files-found: error
+          retention-days: 30

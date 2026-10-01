@@ -1,0 +1,7 @@
+{
+  "source_commit": "f35db03b09645efe659c4c443373f0b1e1c03214",
+  "source_tree": "2e7f37f9e82cd71f6d25bfe3e27bbd94c322da75",
+  "go_version": "1.27.1",
+  "ko_version": "0.19.1",
+  "ko_archive_sha256": "635ac6ea3fd376c935fee597fbb29ab2c2449f49ef1655085fe3aa9c25fed7a5"
+}
