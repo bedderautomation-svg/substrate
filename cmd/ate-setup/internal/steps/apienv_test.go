@@ -104,37 +104,82 @@ func TestRedactDSN(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		dsn  string
-		want string
 	}{
 		{
 			name: "URI userinfo password",
 			dsn:  "postgresql://ate:hunter2@db.example.com:5432/atepg?sslmode=require",
-			want: "postgresql://ate:***@db.example.com:5432/atepg?sslmode=require",
 		},
 		{
 			name: "keyword/value password",
 			dsn:  "user=ate password=hunter2 host=db.example.com",
-			want: "user=ate password=*** host=db.example.com",
 		},
 		{
 			name: "query parameter password",
 			dsn:  "postgresql://db.example.com/atepg?password=hunter2&sslmode=require",
-			want: "postgresql://db.example.com/atepg?password=***&sslmode=require",
 		},
 		{
-			name: "passwordless DSN is unchanged",
+			name: "passwordless DSN",
 			dsn:  "user=ate@p.iam host=127.0.0.1 port=5432 dbname=atepg sslmode=disable",
-			want: "user=ate@p.iam host=127.0.0.1 port=5432 dbname=atepg sslmode=disable",
 		},
 		{
-			name: "the default in-cluster DSN is unchanged",
+			name: "default in-cluster DSN",
 			dsn:  config.DefaultPostgresConnectionString,
-			want: config.DefaultPostgresConnectionString,
+		},
+		{
+			name: "quoted keyword password with spaces",
+			dsn:  "user=ate password='synthetic secret tail' host=db.example.com",
+		},
+		{
+			name: "quoted keyword password with ampersand",
+			dsn:  "user=ate password='synthetic&secret' host=db.example.com",
+		},
+		{
+			name: "escaped quote and backslash in keyword password",
+			dsn:  `user=ate password='synthetic\'secret\\tail' host=db.example.com`,
+		},
+		{
+			name: "percent-encoded URI password",
+			dsn:  "postgresql://ate:synthetic%20secret%40tail@db.example.com/atepg",
+		},
+		{
+			name: "percent-encoded query password",
+			dsn:  "postgresql://db.example.com/atepg?password=synthetic%20secret%26tail&sslmode=require",
+		},
+		{
+			name: "duplicate passwords in URI and query",
+			dsn:  "postgresql://ate:synthetic@db.example.com/atepg?password=another-secret&password=last-secret",
+		},
+		{
+			name: "credentials in another parameter",
+			dsn:  "user=ate host=db.example.com options='api_token=synthetic-secret'",
+		},
+		{
+			name: "unterminated quoted keyword password",
+			dsn:  "user=ate password='synthetic secret tail",
+		},
+		{
+			name: "malformed URI percent escape",
+			dsn:  "postgresql://ate:synthetic%zzsecret@db.example.com/atepg",
+		},
+		{
+			name: "invalid URI query escape",
+			dsn:  "postgresql://db.example.com/atepg?password=synthetic%secret",
+		},
+		{
+			name: "newline and control characters in malformed DSN",
+			dsn:  "password=synthetic\nsecret\x00tail",
+		},
+		{
+			name: "unrecognized input",
+			dsn:  "synthetic secret without DSN syntax",
+		},
+		{
+			name: "empty input",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := redactDSN(tc.dsn); got != tc.want {
-				t.Errorf("redactDSN() = %q, want %q", got, tc.want)
+			if got := redactDSN(tc.dsn); got != "[redacted]" {
+				t.Errorf("redactDSN() = %q, want complete suppression", got)
 			}
 		})
 	}

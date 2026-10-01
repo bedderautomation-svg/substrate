@@ -165,17 +165,11 @@ func withPoolMaxConns(dsn, maxConns string, dsnFromOperator bool) string {
 	}
 }
 
-var (
-	// dsnURIPassword matches the password in a URI userinfo section.
-	dsnURIPassword = regexp.MustCompile(`(://[^:/@]*):[^@]*@`)
-	// dsnKeywordPassword matches a keyword/value or query parameter password.
-	dsnKeywordPassword = regexp.MustCompile(`(password=)[^ &]*`)
-)
-
-// redactDSN masks any password before the connection string is logged.
-func redactDSN(dsn string) string {
-	redacted := dsnURIPassword.ReplaceAllString(dsn, "$1:***@")
-	return dsnKeywordPassword.ReplaceAllString(redacted, "$1***")
+// redactDSN suppresses the whole connection string, including malformed input.
+// Passwords may contain spaces, quotes, and escapes; partial redaction can leak
+// them or credentials carried in other parameters.
+func redactDSN(_ string) string {
+	return "[redacted]"
 }
 
 // EnsureEnvVarsSafeStandalone guards `ate-setup create api-server-env-vars` on
